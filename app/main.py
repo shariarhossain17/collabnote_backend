@@ -56,6 +56,34 @@ def error_response(
 def ping():
     return {"status":"ok","message":"pong"}
 
+def get_current_user(
+        credentials:HTTPAuthorizationCredentials=Depends(security),
+        db:Session=Depends(get_db)
+)->User:
+    token=credentials.credentials
+
+    email=decode_access_token(token)
+
+    if email is None:
+        error_response(
+            status.HTTP_401_UNAUTHORIZED,
+            "Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+
+        )
+    
+
+    user= db.query(User).filter(User.email==email).first()
+
+    if user is None:
+        error_response(
+            status.HTTP_401_UNAUTHORIZED,
+            "Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+
+        )
+    return user
+
 
 @app.post("/auth/signup",response_model=UserOut,status_code=status.HTTP_201_CREATED)
 def signup(user_data: UserCreate, db: Session = Depends(get_db)):
@@ -105,4 +133,11 @@ def login(
     )
 
     return {"access_token": access_token, "token_type": "bearer"}
+
+
+
+@app.get("/profile",response_model=UserOut)
+def profile(current_user:User=Depends(get_current_user)):
+    return current_user
+
 
