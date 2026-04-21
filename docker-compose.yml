@@ -13,7 +13,7 @@ services:
     volumes:
       - pgdata_collabnote:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d lab4_db"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d collabnote"]
       interval: 5s
       timeout: 5s
       retries: 20
