@@ -20,4 +20,4 @@ class User(Base):
     )
 
     def __repr__(self):
-        return f"<USer(id={self.id},email={self.email}),username={self.username})>"
+        return f"<User(id={self.id}, email={self.email}, username={self.username})>"
