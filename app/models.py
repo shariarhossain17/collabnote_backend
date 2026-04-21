@@ -12,6 +12,7 @@ class User(Base):
     pass_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow())
     is_active = Column(Boolean, default=True)
+    role=Column(str(50),default="user")
 
 
     __table_args__= (
