@@ -54,3 +54,15 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     email:Optional[str]=None
+
+
+
+
+# notes
+
+class CreateNote(BaseModel):
+    title:str
+    content:str
+    tags:list[str]
+
+

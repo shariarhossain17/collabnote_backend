@@ -3,7 +3,7 @@ version: "3.9"
 services:
   db:
     image: postgres:16
-    container_name: collabnote
+    container_name: collabnote_postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -18,5 +18,23 @@ services:
       timeout: 5s
       retries: 20
 
+  # MongoDB for activity logs
+  mongodb:
+    image: mongo:7
+    container_name: collabnote_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongodb
+      MONGO_INITDB_ROOT_PASSWORD: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata_collabnote:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
 volumes:
   pgdata_collabnote:
+  mongodata_collabnote:
