@@ -1,7 +1,7 @@
-from pydantic import BaseModel,EmailStr,Field
-
-
 from typing import Optional
+
+from pydantic import BaseModel, EmailStr, Field
+
 
 class UserCreate(BaseModel):
     email:EmailStr
@@ -64,5 +64,38 @@ class CreateNote(BaseModel):
     title:str
     content:str
     tags:list[str]
+
+    class Config:
+        json_schema_extra={
+            "example":{
+                "title":"Notes",
+                "content":"Hello i am note",
+                "tags":["personal","public"]
+            }
+        }
+
+
+
+class NoteOut(BaseModel):
+    id:str=Field(alias="_id",description="Mongodb document id")
+    user_id:str
+    title:str
+    content:str
+    tags:list[str]
+
+    class Config:
+        json_schema_extra={
+            "example":{
+                "_id":"507f1f77bcf86cd799439011",
+                "user_id":"1",
+                "title":"Notes",
+                "content":"Hello i am note",
+                "tags":["personal","public"]
+            }
+        }
+    
+
+
+
 
 
