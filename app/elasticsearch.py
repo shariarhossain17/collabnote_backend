@@ -35,6 +35,16 @@ async def connect_to_elasticsearch():
             }
         )
         print(f"created elastic search index:{ELASTICSEARCH_INDEX}")
-    
 
+
+async def close_elasticsearch_connection():
+    global es_client
+    if es_client:
+        await es_client.close()
+        print("Closed Elasticsearch connection")
+
+
+        
+def get_elasticsearch():
+    return es_client
 
