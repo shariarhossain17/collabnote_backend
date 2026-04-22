@@ -75,6 +75,21 @@ class CreateNote(BaseModel):
         }
 
 
+class UpdateNote(BaseModel):
+    title:Optional[str]=None
+    content:Optional[str]=None
+    tags:Optional[list[str]]=None
+
+    class Config:
+        json_schema_extra={
+            "example":{
+                "title":"Updated Notes",
+                "content":"Updated content",
+                "tags":["personal","public","updated"]
+            }
+        }
+
+
 
 class NoteOut(BaseModel):
     id:str=Field(alias="_id",description="Mongodb document id")
