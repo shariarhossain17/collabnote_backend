@@ -1,24 +1,19 @@
 import os
-
+from datetime import datetime, timedelta
+from typing import Dict, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI,Depends,HTTPException,status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
+                              OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
-from typing import Optional,Dict
 
-
-from datetime import timedelta,datetime
-from .schemas import UserCreate,UserOut,Token,TokenData
-from .models import User
+from .auth import (ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token,
+                   decode_access_token, hash_password, verify_password)
 from .database import SessionLocal
-from .auth import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    decode_access_token,
-    ACCESS_TOKEN_EXPIRE_MINUTES
-)
+from .models import User
+from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
+from .schemas import CreateNote, NoteOut, Token, TokenData, UserCreate, UserOut
 
 load_dotenv()
 
@@ -31,6 +26,18 @@ app=FastAPI(
 
 security=HTTPBearer()
 
+#mongodb
+
+@app.on_event("startup")
+async def startup_event():
+    await connect_to_mongodb()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_mongodb_connection()
+
+#postgres db
 
 def get_db():
     db=SessionLocal()
@@ -42,6 +49,8 @@ def get_db():
         db.close()
 
 
+
+#application start
 def error_response(
     status_code: int,
     message: str,
@@ -141,3 +150,41 @@ def profile(current_user:User=Depends(get_current_user)):
     return current_user
 
 
+#note route
+
+
+@app.post("/notes",response_model=NoteOut,status_code=status.HTTP_201_CREATED)
+async def create_note(
+    note_data:CreateNote,
+    current_user:User=Depends(get_current_user)
+):
+    mongodb=get_mongodb()
+
+    new_note={
+        "user_id":current_user.id,
+        "title":note_data.title,
+        "content":note_data.content,
+        "tags":note_data.tags,
+        "created_at":datetime.utcnow()
+
+    }
+
+
+    result = await mongodb.notes.insert_one(new_note)
+
+    if result.inserted_id:
+         return {
+            "_id": str(result.inserted_id),
+            "user_id": str(current_user.id),
+            "title": new_note["title"],
+            "content": new_note["content"],
+            "tags": new_note["tags"],
+            "created_at": new_note["created_at"].isoformat()
+        }
+    else:
+        return error_response(status.HTTP_400_BAD_REQUEST, "note created failed")
+        
+  
+
+
+    

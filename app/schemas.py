@@ -82,15 +82,18 @@ class NoteOut(BaseModel):
     title:str
     content:str
     tags:list[str]
+    created_at:str
 
     class Config:
+        populate_by_name = True
         json_schema_extra={
             "example":{
                 "_id":"507f1f77bcf86cd799439011",
                 "user_id":"1",
                 "title":"Notes",
                 "content":"Hello i am note",
-                "tags":["personal","public"]
+                "tags":["personal","public"],
+                "created_at":"2026-04-22T06:40:07.241083"
             }
         }
     
