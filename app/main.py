@@ -1,24 +1,21 @@
 import os
+from datetime import datetime, timedelta
+from typing import Dict, Optional
 
-
+from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import FastAPI,Depends,HTTPException,status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
+from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
+                              OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
-from typing import Optional,Dict
 
-
-from datetime import timedelta,datetime
-from .schemas import UserCreate,UserOut,Token,TokenData
-from .models import User
+from .auth import (ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token,
+                   decode_access_token, hash_password, verify_password)
 from .database import SessionLocal
-from .auth import (
-    hash_password,
-    verify_password,
-    create_access_token,
-    decode_access_token,
-    ACCESS_TOKEN_EXPIRE_MINUTES
-)
+from .models import User
+from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
+from .schemas import (CreateNote, NoteOut, Token, TokenData, UpdateNote,
+                      UserCreate, UserOut)
 
 load_dotenv()
 
@@ -31,6 +28,18 @@ app=FastAPI(
 
 security=HTTPBearer()
 
+#mongodb
+
+@app.on_event("startup")
+async def startup_event():
+    await connect_to_mongodb()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_mongodb_connection()
+
+#postgres db
 
 def get_db():
     db=SessionLocal()
@@ -42,6 +51,8 @@ def get_db():
         db.close()
 
 
+
+#application start
 def error_response(
     status_code: int,
     message: str,
@@ -141,3 +152,186 @@ def profile(current_user:User=Depends(get_current_user)):
     return current_user
 
 
+#note route
+
+
+@app.post("/notes",response_model=NoteOut,status_code=status.HTTP_201_CREATED)
+async def create_note(
+    note_data:CreateNote,
+    current_user:User=Depends(get_current_user)
+):
+    mongodb=get_mongodb()
+
+    new_note={
+        "user_id":current_user.id,
+        "title":note_data.title,
+        "content":note_data.content,
+        "tags":note_data.tags,
+        "created_at":datetime.utcnow()
+
+    }
+
+
+    result = await mongodb.notes.insert_one(new_note)
+
+    if result.inserted_id:
+         return {
+            "_id": str(result.inserted_id),
+            "user_id": str(current_user.id),
+            "title": new_note["title"],
+            "content": new_note["content"],
+            "tags": new_note["tags"],
+            "created_at": new_note["created_at"].isoformat()
+        }
+    else:
+        return error_response(status.HTTP_400_BAD_REQUEST, "note created failed")
+        
+
+@app.get("/notes", response_model=list[NoteOut])
+async def get_notes(
+    current_user: User = Depends(get_current_user),
+    limit:int=10
+):
+    mongodb = get_mongodb()
+
+    cursor = mongodb.notes.find({
+        "user_id": current_user.id
+    }).sort("created_at", -1)
+
+    notes = await cursor.to_list(limit)  
+
+    for note in notes:
+        note["_id"] = str(note["_id"])
+        note["user_id"] = str(note["user_id"])
+        note["created_at"] = note["created_at"].isoformat()
+
+    return notes
+
+
+@app.get("/notes/{note_id}", response_model=NoteOut)
+async def get_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    mongodb = get_mongodb()
+    
+    try:
+        object_id = ObjectId(note_id)
+    except:
+        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
+    
+    note = await mongodb.notes.find_one({
+        "_id": object_id,
+        "user_id": current_user.id
+    })
+    
+    if not note:
+        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
+    
+    note["_id"] = str(note["_id"])
+    note["user_id"] = str(note["user_id"])
+    note["created_at"] = note["created_at"].isoformat()
+    
+    return note
+
+
+@app.put("/notes/{note_id}", response_model=NoteOut)
+async def update_note(
+    note_id: str,
+    note_data: UpdateNote,
+    current_user: User = Depends(get_current_user)
+):
+    mongodb = get_mongodb()
+    
+    try:
+        object_id = ObjectId(note_id)
+    except:
+        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
+    
+    existing_note = await mongodb.notes.find_one({
+        "_id": object_id,
+        "user_id": current_user.id
+    })
+    
+    if not existing_note:
+        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
+    
+   
+    update_data = {}
+    if note_data.title is not None:
+        update_data["title"] = note_data.title
+    if note_data.content is not None:
+        update_data["content"] = note_data.content
+    if note_data.tags is not None:
+        update_data["tags"] = note_data.tags
+    
+    if not update_data:
+        error_response(status.HTTP_400_BAD_REQUEST, "No fields to update")
+    
+    # Update the note
+    result = await mongodb.notes.update_one(
+        {"_id": object_id},
+        {"$set": update_data}
+    )
+    
+    if result.modified_count == 0:
+        error_response(status.HTTP_400_BAD_REQUEST, "Failed to update note")
+    
+    updated_note = await mongodb.notes.find_one({"_id": object_id})
+    
+    updated_note["_id"] = str(updated_note["_id"])
+    updated_note["user_id"] = str(updated_note["user_id"])
+    updated_note["created_at"] = updated_note["created_at"].isoformat()
+    
+    return updated_note
+
+
+@app.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user)
+):
+
+    mongodb = get_mongodb()
+    
+    try:
+        object_id = ObjectId(note_id)
+    except:
+        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
+    
+    existing_note = await mongodb.notes.find_one({
+        "_id": object_id,
+        "user_id": current_user.id
+    })
+    
+    if not existing_note:
+        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
+    
+    result = await mongodb.notes.delete_one({
+        "_id": object_id
+    })
+    
+    if result.deleted_count == 0:
+        error_response(status.HTTP_400_BAD_REQUEST, "Failed to delete note")
+
+
+@app.get("/users/{user_id}/notes", response_model=list[NoteOut])
+async def get_user_notes(
+    user_id: int,
+    current_user: User = Depends(get_current_user),
+    limit: int = 10
+):
+    mongodb = get_mongodb()
+    
+    cursor = mongodb.notes.find({
+        "user_id": user_id
+    }).sort("created_at", -1)
+
+    notes = await cursor.to_list(limit)  
+
+    for note in notes:
+        note["_id"] = str(note["_id"])
+        note["user_id"] = str(note["user_id"])
+        note["created_at"] = note["created_at"].isoformat()
+
+    return notes
