@@ -316,9 +316,6 @@ async def update_note(
     )
 
     
-
-    
-    
     return updated_note
 
 
@@ -381,7 +378,7 @@ async def get_user_notes(
     return notes
 
 
-@app.get("/search",response_model=SearchResult)
+@app.get("/search",response_model=list[SearchResult])
 async def search_notes(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(default=10, le=100)
@@ -423,3 +420,7 @@ async def search_notes(
         results.append(result)
 
     return results
+    
+
+
+

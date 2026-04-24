@@ -24,7 +24,7 @@ async def connect_to_elasticsearch():
         await es_client.indices.create(
             index=ELASTICSEARCH_INDEX,
             body={
-                "mapping":{
+                "mappings":{
                     "properties":{
                         "title": {"type": "text"},
                         "content": {"type": "text"},
@@ -44,7 +44,7 @@ async def close_elasticsearch_connection():
         print("Closed Elasticsearch connection")
 
 
-        
+
 def get_elasticsearch():
     return es_client
 
