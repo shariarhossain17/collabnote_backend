@@ -61,8 +61,22 @@ services:
       timeout: 10s
       retries: 5
       start_period: 60s
+  redis:
+    image: redis:7-alpine
+    container_name: collabnote_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata_collabnote:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   pgdata_collabnote:
   mongodata_collabnote:
   esdata_collabnote:
+  redisdata_collabnote:

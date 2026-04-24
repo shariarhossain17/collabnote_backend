@@ -11,3 +11,11 @@ sysctl vm.max_map_count
 # Check Elasticsearch health:
 
 curl http://localhost:9200/\_cluster/health?pretty
+
+# Check MongoDB
+
+docker exec -it collabnote_mongodb mongosh --eval "db.adminCommand('ping')"
+
+# Check Redis
+
+docker exec -it collabnote_redis redis-cli ping
