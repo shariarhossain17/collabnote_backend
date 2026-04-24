@@ -1,10 +1,10 @@
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-
+import time
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status,Header
 from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
                               OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
@@ -17,6 +17,8 @@ from .elasticsearch import (ELASTICSEARCH_INDEX,
                             connect_to_elasticsearch, get_elasticsearch)
 from .models import User
 from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
+from .redis_client import (cache_delete, cache_get, cache_set,
+                           close_redis_connection, connect_to_redis,cache_delete_pattern)
 from .schemas import (CreateNote, NoteOut, SearchResult, Token, TokenData,
                       UpdateNote, UserCreate, UserOut)
 
@@ -37,12 +39,14 @@ security=HTTPBearer()
 async def startup_event():
     await connect_to_mongodb()
     await connect_to_elasticsearch()
+    await connect_to_redis()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_mongodb_connection()
     await close_elasticsearch_connection()
+    await close_redis_connection()
 
 #postgres db
 
@@ -230,8 +234,27 @@ async def get_notes(
 @app.get("/notes/{note_id}", response_model=NoteOut)
 async def get_note(
     note_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_cache_control: Optional[str] = Header(None)
 ):
+    
+    start_time= time.time()
+
+
+    bypass_cache=x_cache_control=="no-cache"
+
+
+    if not bypass_cache:
+        cached_note= await cache_get(f"note:{note_id}")
+
+        if cached_note:
+            elapsed =(time.time()-start_time)*1000
+            print(f"Cache HIT for note:{note_id} ({elapsed:.2f}ms)")
+            return NoteOut(**cached_note)
+
+
+
+
     mongodb = get_mongodb()
     
     try:
@@ -250,6 +273,12 @@ async def get_note(
     note["_id"] = str(note["_id"])
     note["user_id"] = str(note["user_id"])
     note["created_at"] = note["created_at"].isoformat()
+
+    cache_note = note.copy()
+    await cache_set(f"note:{note_id}", cache_note)
+
+    elapsed = (time.time() - start_time) * 1000
+    print(f"Cache MISS for note:{note_id} ({elapsed:.2f}ms)")
     
     return note
 
@@ -293,9 +322,13 @@ async def update_note(
         {"_id": object_id},
         {"$set": update_data}
     )
+
+    print(result.modified_count,"from update")
     
     if result.modified_count == 0:
         error_response(status.HTTP_400_BAD_REQUEST, "Failed to update note")
+    
+    await cache_delete(f"note:{note_id}")
     
     updated_note = await mongodb.notes.find_one({"_id": object_id})
     
@@ -311,7 +344,7 @@ async def update_note(
             "title": updated_note["title"],
             "content": updated_note["content"],
             "tags": updated_note["tags"],
-            "created_at": updated_note["created_at"].isoformat()
+            "created_at": updated_note["created_at"]
         }
     )
 
@@ -351,6 +384,7 @@ async def delete_note(
 
     try:
         await es.delete(index=ELASTICSEARCH_INDEX,id=note_id)
+        await cache_delete(f"note:{note_id}")
     except Exception as e:
         print(f"Failed to delete from Elasticsearch: {e}")
     return None
@@ -424,3 +458,29 @@ async def search_notes(
 
 
 
+@app.get("/cache/stats")
+async def cache_stats():
+    from .redis_client import get_redis
+    redis = get_redis()
+
+    info = await redis.info("stats")
+
+    total_commands = info.get("total_commands_processed", 0)
+    keyspace_hits = info.get("keyspace_hits", 0)
+    keyspace_misses = info.get("keyspace_misses", 0)
+
+    total_requests = keyspace_hits + keyspace_misses
+    hit_rate = (keyspace_hits / total_requests * 100) if total_requests > 0 else 0
+
+    return {
+        "keyspace_hits": keyspace_hits,
+        "keyspace_misses": keyspace_misses,
+        "hit_rate_percentage": round(hit_rate, 2),
+        "total_commands": total_commands
+    }
+
+
+@app.delete("/cache/clear")
+async def clear_cache():
+    await cache_delete_pattern("note:*")
+    return {"message": "Cache cleared successfully"}
