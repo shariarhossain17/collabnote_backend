@@ -4,7 +4,7 @@ from typing import Dict, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
                               OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 from .auth import (ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token,
                    decode_access_token, hash_password, verify_password)
 from .database import SessionLocal
+from .elasticsearch import (ELASTICSEARCH_INDEX,
+                            close_elasticsearch_connection,
+                            connect_to_elasticsearch, get_elasticsearch)
 from .models import User
 from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
-from .schemas import (CreateNote, NoteOut, Token, TokenData, UpdateNote,
-                      UserCreate, UserOut)
+from .schemas import (CreateNote, NoteOut, SearchResult, Token, TokenData,
+                      UpdateNote, UserCreate, UserOut)
 
 load_dotenv()
 
@@ -33,11 +36,13 @@ security=HTTPBearer()
 @app.on_event("startup")
 async def startup_event():
     await connect_to_mongodb()
+    await connect_to_elasticsearch()
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_mongodb_connection()
+    await close_elasticsearch_connection()
 
 #postgres db
 
@@ -161,6 +166,7 @@ async def create_note(
     current_user:User=Depends(get_current_user)
 ):
     mongodb=get_mongodb()
+    es=get_elasticsearch()
 
     new_note={
         "user_id":current_user.id,
@@ -175,6 +181,19 @@ async def create_note(
     result = await mongodb.notes.insert_one(new_note)
 
     if result.inserted_id:
+         
+         note_id = str(result.inserted_id)
+
+         await es.index(
+             index=ELASTICSEARCH_INDEX,
+             id=note_id,
+              document={
+            "title": note_data.title,
+            "content": note_data.content,
+            "tags": note_data.tags,
+            "created_at": new_note["created_at"].isoformat()
+        }
+         )
          return {
             "_id": str(result.inserted_id),
             "user_id": str(current_user.id),
@@ -242,6 +261,7 @@ async def update_note(
     current_user: User = Depends(get_current_user)
 ):
     mongodb = get_mongodb()
+    es=get_elasticsearch()
     
     try:
         object_id = ObjectId(note_id)
@@ -282,6 +302,19 @@ async def update_note(
     updated_note["_id"] = str(updated_note["_id"])
     updated_note["user_id"] = str(updated_note["user_id"])
     updated_note["created_at"] = updated_note["created_at"].isoformat()
+
+
+    await es.index(
+        index=ELASTICSEARCH_INDEX,
+        id=str(updated_note["_id"]),
+        document={
+            "title": updated_note["title"],
+            "content": updated_note["content"],
+            "tags": updated_note["tags"],
+            "created_at": updated_note["created_at"].isoformat()
+        }
+    )
+
     
     return updated_note
 
@@ -293,6 +326,7 @@ async def delete_note(
 ):
 
     mongodb = get_mongodb()
+    es=get_elasticsearch()
     
     try:
         object_id = ObjectId(note_id)
@@ -315,6 +349,13 @@ async def delete_note(
         error_response(status.HTTP_400_BAD_REQUEST, "Failed to delete note")
 
 
+    try:
+        await es.delete(index=ELASTICSEARCH_INDEX,id=note_id)
+    except Exception as e:
+        print(f"Failed to delete from Elasticsearch: {e}")
+    return None
+
+
 @app.get("/users/{user_id}/notes", response_model=list[NoteOut])
 async def get_user_notes(
     user_id: int,
@@ -335,3 +376,51 @@ async def get_user_notes(
         note["created_at"] = note["created_at"].isoformat()
 
     return notes
+
+
+@app.get("/search",response_model=list[SearchResult])
+async def search_notes(
+    q: str = Query(..., min_length=1, description="Search query"),
+    limit: int = Query(default=10, le=100)
+):
+    es = get_elasticsearch()
+    search_body = {
+        "query": {
+            "multi_match": {
+                "query": q,
+                "fields": ["title^3", "content"],
+                "fuzziness": "AUTO"
+            }
+        },
+        "highlight": {
+            "fields": {
+                "title": {},
+                "content": {"fragment_size": 150}
+            }
+        },
+        "size": limit
+    }
+
+
+    response = await es.search(
+        index=ELASTICSEARCH_INDEX,
+        body=search_body
+    )
+
+    results = []
+    for hit in response["hits"]["hits"]:
+        result = SearchResult(
+            id=hit["_id"],
+            title=hit["_source"]["title"],
+            content=hit["_source"]["content"],
+            tags=hit["_source"]["tags"],
+            score=hit["_score"],
+            highlight=hit.get("highlight")
+        )
+        results.append(result)
+
+    return results
+    
+
+
+

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -111,7 +111,30 @@ class NoteOut(BaseModel):
                 "created_at":"2026-04-22T06:40:07.241083"
             }
         }
-    
+
+
+
+class SearchResult(BaseModel):
+    id: str
+    title: str
+    content: str
+    tags: List[str]
+    score: float
+    highlight: Optional[dict] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": "507f1f77bcf86cd799439011",
+                "title": "FastAPI Tutorial",
+                "content": "FastAPI is a modern web framework...",
+                "tags": ["fastapi", "python"],
+                "score": 8.5,
+                "highlight": {
+                    "title": ["<em>FastAPI</em> Tutorial"]
+                }
+            }
+        }
 
 
 
