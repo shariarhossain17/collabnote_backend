@@ -55,5 +55,6 @@ async def publish_blog(log_data:dict):
 
 
 
-
+def get_topic_name():
+    return KAFKA_TOPIC
 
