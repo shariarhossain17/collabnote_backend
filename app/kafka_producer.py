@@ -38,4 +38,22 @@ async def stop_kafka_producer():
 
 
 
+async def publish_blog(log_data:dict):
+
+    if not kafka_producer:
+        RuntimeError ("kafka producer not initialized")
+
+
+
+    try:
+        await kafka_producer.sed_and_await(KAFKA_TOPIC,log_data)
+        print(f"Published to Kafka: {log_data}")
+
+    except Exception as e:
+        print(f"Failed to publish to Kafka: {e}")
+        raise
+
+
+
+
 
