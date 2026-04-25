@@ -1,10 +1,11 @@
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
 
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
 from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
                               OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
@@ -15,10 +16,14 @@ from .database import SessionLocal
 from .elasticsearch import (ELASTICSEARCH_INDEX,
                             close_elasticsearch_connection,
                             connect_to_elasticsearch, get_elasticsearch)
+from .kafka_producer import (get_topic_name, publish_log, start_kafka_producer,
+                             stop_kafka_producer)
 from .models import User
 from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
-from .schemas import (CreateNote, NoteOut, SearchResult, Token, TokenData,
-                      UpdateNote, UserCreate, UserOut)
+from .redis_client import (cache_delete, cache_delete_pattern, cache_get,
+                           cache_set, close_redis_connection, connect_to_redis)
+from .schemas import (CreateNote, EventSchema, NoteOut, SearchResult, Token,
+                      TokenData, UpdateNote, UserCreate, UserOut)
 
 load_dotenv()
 
@@ -37,12 +42,19 @@ security=HTTPBearer()
 async def startup_event():
     await connect_to_mongodb()
     await connect_to_elasticsearch()
+    await connect_to_redis()
+    await start_kafka_producer()
+    print("Application started successfully")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
     await close_mongodb_connection()
     await close_elasticsearch_connection()
+    await close_redis_connection()
+    await stop_kafka_producer()
+    print("Application shutdown complete")
+
 
 #postgres db
 
@@ -102,7 +114,7 @@ def get_current_user(
 
 
 @app.post("/auth/signup",response_model=UserOut,status_code=status.HTTP_201_CREATED)
-def signup(user_data: UserCreate, db: Session = Depends(get_db)):
+async def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     
     existing_user = db.query(User).filter(
         (User.email == user_data.email) | (User.username == user_data.username)
@@ -126,11 +138,27 @@ def signup(user_data: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
+    #publish to kafka
+    try:
+        await publish_log({
+            "event_type": "user_signup",
+            "user_id": new_user.id,
+            "resource_id": None,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "email": new_user.email,
+                "username": new_user.username
+            }
+        })
+    except Exception as e:
+        print("Kafka publish failed:", e)
+
+
     return new_user
 
 
 @app.post("/auth/login", response_model=Token)
-def login(
+async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
@@ -147,6 +175,22 @@ def login(
         data={"sub": user.email},
         expire_delta=access_token_expires
     )
+
+
+     # Kafka event publish
+    try:
+        await publish_log({
+            "event_type": "user_login",
+            "user_id": user.id,
+            "resource_id": None,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "username": user.username
+            }
+        })
+    except Exception as e:
+        print("Kafka publish failed:", e)
+    
 
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -194,6 +238,19 @@ async def create_note(
             "created_at": new_note["created_at"].isoformat()
         }
          )
+
+        # Kafka event publish
+         await publish_log({
+             "event_type": "note_created",
+                "user_id": current_user.id,
+                "resource_id": note_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": {
+                    "title": note_data.title,
+                    "tags": note_data.tags
+                }
+         })
+
          return {
             "_id": str(result.inserted_id),
             "user_id": str(current_user.id),
@@ -230,8 +287,27 @@ async def get_notes(
 @app.get("/notes/{note_id}", response_model=NoteOut)
 async def get_note(
     note_id: str,
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    x_cache_control: Optional[str] = Header(None)
 ):
+    
+    start_time= time.time()
+
+
+    bypass_cache=x_cache_control=="no-cache"
+
+
+    if not bypass_cache:
+        cached_note= await cache_get(f"note:{note_id}")
+
+        if cached_note:
+            elapsed =(time.time()-start_time)*1000
+            print(f"Cache HIT for note:{note_id} ({elapsed:.2f}ms)")
+            return NoteOut(**cached_note)
+
+
+
+
     mongodb = get_mongodb()
     
     try:
@@ -250,6 +326,12 @@ async def get_note(
     note["_id"] = str(note["_id"])
     note["user_id"] = str(note["user_id"])
     note["created_at"] = note["created_at"].isoformat()
+
+    cache_note = note.copy()
+    await cache_set(f"note:{note_id}", cache_note)
+
+    elapsed = (time.time() - start_time) * 1000
+    print(f"Cache MISS for note:{note_id} ({elapsed:.2f}ms)")
     
     return note
 
@@ -293,9 +375,13 @@ async def update_note(
         {"_id": object_id},
         {"$set": update_data}
     )
+
+    print(result.modified_count,"from update")
     
     if result.modified_count == 0:
         error_response(status.HTTP_400_BAD_REQUEST, "Failed to update note")
+    
+    await cache_delete(f"note:{note_id}")
     
     updated_note = await mongodb.notes.find_one({"_id": object_id})
     
@@ -311,9 +397,25 @@ async def update_note(
             "title": updated_note["title"],
             "content": updated_note["content"],
             "tags": updated_note["tags"],
-            "created_at": updated_note["created_at"].isoformat()
+            "created_at": updated_note["created_at"]
         }
     )
+
+
+
+    # Kafka event publish
+    try:
+        await publish_log({
+            "event_type": "note_updated",
+            "user_id": current_user.id,
+            "resource_id": note_id,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "updated_fields": list(update_data.keys())
+            }
+        })
+    except Exception as e:
+        print("Kafka publish failed:", e)
 
     
     return updated_note
@@ -351,6 +453,22 @@ async def delete_note(
 
     try:
         await es.delete(index=ELASTICSEARCH_INDEX,id=note_id)
+        await cache_delete(f"note:{note_id}")
+
+        # Kafka event publish
+        try:
+            await publish_log({
+                "event_type": "note_deleted",
+                "user_id": current_user.id,
+                "resource_id": note_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": {
+                    "title": existing_note.get("title"),
+                    "tags": existing_note.get("tags")
+                }
+            })
+        except Exception as e:
+            print("Kafka publish failed:", e)
     except Exception as e:
         print(f"Failed to delete from Elasticsearch: {e}")
     return None
@@ -381,7 +499,8 @@ async def get_user_notes(
 @app.get("/search",response_model=list[SearchResult])
 async def search_notes(
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(default=10, le=100)
+    limit: int = Query(default=10, le=100),
+    current_user: User = Depends(get_current_user)
 ):
     es = get_elasticsearch()
     search_body = {
@@ -419,8 +538,90 @@ async def search_notes(
         )
         results.append(result)
 
+     # Kafka event publish
+    try:
+        await publish_log({
+            "event_type": "note_searched",
+            "user_id": current_user.id,
+            "resource_id": None,
+            "timestamp": datetime.utcnow().isoformat(),
+            "metadata": {
+                "query": q,
+                "result_count": len(results)
+            }
+        })
+    except Exception as e:
+        print("Kafka publish failed:", e)
+
+
     return results
     
 
 
 
+@app.get("/cache/stats")
+async def cache_stats():
+    from .redis_client import get_redis
+    redis = get_redis()
+
+    info = await redis.info("stats")
+
+    total_commands = info.get("total_commands_processed", 0)
+    keyspace_hits = info.get("keyspace_hits", 0)
+    keyspace_misses = info.get("keyspace_misses", 0)
+
+    total_requests = keyspace_hits + keyspace_misses
+    hit_rate = (keyspace_hits / total_requests * 100) if total_requests > 0 else 0
+
+    return {
+        "keyspace_hits": keyspace_hits,
+        "keyspace_misses": keyspace_misses,
+        "hit_rate_percentage": round(hit_rate, 2),
+        "total_commands": total_commands
+    }
+
+
+@app.delete("/cache/clear")
+async def clear_cache():
+    await cache_delete_pattern("note:*")
+    return {"message": "Cache cleared successfully"}   
+
+
+
+
+@app.get("/activity",response_model=list[EventSchema], status_code=status.HTTP_200_OK)
+async def get_activity(
+    current_user: User = Depends(get_current_user)
+):
+    mongodb = get_mongodb()
+
+    cursor = mongodb.activity_logs.find(
+        {"user_id": current_user.id}
+    ).sort("timestamp", -1).limit(20)
+
+    activities = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        activities.append(doc)
+
+    return activities
+
+
+@app.get("/stats")
+async def get_stats():
+    """Get statistics about logged events"""
+    mongodb = get_mongodb()
+
+    total_logs = await mongodb.activity_logs.count_documents({})
+
+    # Count by action type
+    pipeline = [
+        {"$group": {"_id": "$action", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    action_stats = await mongodb.logs.aggregate(pipeline).to_list(length=100)
+
+    return {
+        "total_logs": total_logs,
+        "by_action": action_stats
+    }
