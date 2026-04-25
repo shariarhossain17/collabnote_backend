@@ -139,4 +139,28 @@ class SearchResult(BaseModel):
 
 
 
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+from datetime import datetime
 
+
+class EventSchema(BaseModel):
+    event_type: str
+    user_id: int
+    resource_id: Optional[str] = None
+    timestamp: datetime
+    metadata: Optional[Dict[str, Any]] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "event_type": "note_created",
+                "user_id": 42,
+                "resource_id": "507f1f77bcf86cd799439011",
+                "timestamp": "2025-02-25T14:30:00Z",
+                "metadata": {
+                    "title": "My Note",
+                    "tags": ["api"]
+                }
+            }
+        }
