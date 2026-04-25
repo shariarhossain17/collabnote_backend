@@ -28,3 +28,14 @@ async def start_kafka_producer():
     await kafka_producer.start()
 
     print(f"kafka producer started:{kafka_producer}")
+
+async def stop_kafka_producer():
+    global kafka_producer
+
+    if kafka_producer:
+        await kafka_producer.stop()
+        print("Kafka producer stopped")
+
+
+
+
