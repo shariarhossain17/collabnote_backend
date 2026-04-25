@@ -585,3 +585,43 @@ async def cache_stats():
 async def clear_cache():
     await cache_delete_pattern("note:*")
     return {"message": "Cache cleared successfully"}   
+
+
+
+
+@app.get("/activity",response_model=list[EventSchema], status_code=status.HTTP_200_OK)
+async def get_activity(
+    current_user: User = Depends(get_current_user)
+):
+    mongodb = get_mongodb()
+
+    cursor = mongodb.activity_logs.find(
+        {"user_id": current_user.id}
+    ).sort("timestamp", -1).limit(20)
+
+    activities = []
+    async for doc in cursor:
+        doc["_id"] = str(doc["_id"])
+        activities.append(doc)
+
+    return activities
+
+
+@app.get("/stats")
+async def get_stats():
+    """Get statistics about logged events"""
+    mongodb = get_mongodb()
+
+    total_logs = await mongodb.activity_logs.count_documents({})
+
+    # Count by action type
+    pipeline = [
+        {"$group": {"_id": "$action", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}}
+    ]
+    action_stats = await mongodb.logs.aggregate(pipeline).to_list(length=100)
+
+    return {
+        "total_logs": total_logs,
+        "by_action": action_stats
+    }
