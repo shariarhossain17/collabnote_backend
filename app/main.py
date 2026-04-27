@@ -2,10 +2,10 @@ import os
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-
+import socket
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, status,Request
 from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
                               OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
@@ -26,6 +26,12 @@ from .schemas import (CreateNote, EventSchema, NoteOut, SearchResult, Token,
                       TokenData, UpdateNote, UserCreate, UserOut)
 
 load_dotenv()
+
+
+
+# nginx instance id and hostname
+INSTANCE_ID = os.getenv("INSTANCE_ID", "unknown")
+HOSTNAME = socket.gethostname()
 
 app=FastAPI(
     title=os.getenv("APP_NAME","Collabnote"),
@@ -80,10 +86,29 @@ def error_response(
         detail=message,
         headers=headers
     )
+
+@app.get("/")
+async def home(request: Request):
+    return {
+        "message": f"Hello from {INSTANCE_ID}!",
+        "instance_id": INSTANCE_ID,
+        "hostname": HOSTNAME,
+        "client_ip": request.headers.get("X-Real-IP", request.client.host),
+    }
+
+
 @app.get("/ping")
 def ping():
     return {"status":"ok","message":"pong"}
 
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "healthy",
+        "instance_id": INSTANCE_ID
+    }
 def get_current_user(
         credentials:HTTPAuthorizationCredentials=Depends(security),
         db:Session=Depends(get_db)
@@ -607,7 +632,7 @@ async def get_activity(
     return activities
 
 
-@app.get("/stats")
+@app.get("/activity/stats")
 async def get_stats():
     """Get statistics about logged events"""
     mongodb = get_mongodb()
