@@ -24,6 +24,8 @@ from .redis_client import (cache_delete, cache_delete_pattern, cache_get,
                            cache_set, close_redis_connection, connect_to_redis)
 from .schemas import (CreateNote, EventSchema, NoteOut, SearchResult, Token,
                       TokenData, UpdateNote, UserCreate, UserOut)
+from strawberry.fastapi import GraphQLRouter
+from .graphql_schema import schema
 
 load_dotenv()
 
@@ -38,6 +40,17 @@ app=FastAPI(
     description="Collabnote backend",
     version="1.0.0"
 )
+
+async def get_context(request: Request):
+    db = SessionLocal()
+    auth_header = request.headers.get("Authorization")
+    token = None
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    return {"db": db, "token": token}
+
+graphql_app = GraphQLRouter(schema, context_getter=get_context)
+app.include_router(graphql_app, prefix="/graphql")
 
 
 security=HTTPBearer()
