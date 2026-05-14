@@ -192,6 +192,29 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  fastapi:
+    build: .
+    container_name: ci_cd_collabnote
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - INSTANCE_ID=Local-Dev
+    volumes:
+      - ./app:/app/app # For hot-reloading during development
+    restart: unless-stopped
+    networks:
+      - collabnote_network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
 networks:
   collabnote_network:
     driver: bridge
