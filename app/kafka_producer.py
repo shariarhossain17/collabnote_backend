@@ -1,6 +1,5 @@
 import json
 import os
-from datetime import datetime
 
 from aiokafka import AIOKafkaProducer
 from dotenv import load_dotenv

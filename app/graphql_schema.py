@@ -5,7 +5,6 @@ from bson import ObjectId
 from sqlalchemy.orm import Session
 
 from app.mongodb import get_mongodb
-from app.database import SessionLocal
 from app.models import User as UserModel
 from app.auth import decode_access_token
 from app.elasticsearch import get_elasticsearch
@@ -149,7 +148,7 @@ class Query:
         db = get_mongodb()
         try:
             obj_id = ObjectId(id)
-        except:
+        except (ValueError, TypeError):
             raise Exception("Invalid note ID")
         note = await db.notes.find_one({"_id": obj_id})
         if not note:

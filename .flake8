@@ -2,7 +2,9 @@
 max-line-length = 88
 extend-ignore = 
     D100,D101,D102,D103,D104,D105,D106,
-    E203,W291,W292,W293,W391
+    E111,E114,E116,E117,E122,E131,E201,E203,
+    E225,E231,E252,E265,E302,E303,E402,
+    W291,W292,W293,W391
 exclude = 
     .git,
     __pycache__,

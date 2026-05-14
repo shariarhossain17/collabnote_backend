@@ -16,14 +16,14 @@ from .database import SessionLocal
 from .elasticsearch import (ELASTICSEARCH_INDEX,
                             close_elasticsearch_connection,
                             connect_to_elasticsearch, get_elasticsearch)
-from .kafka_producer import (get_topic_name, publish_log, start_kafka_producer,
+from .kafka_producer import (publish_log, start_kafka_producer,
                              stop_kafka_producer)
 from .models import User
 from .mongodb import close_mongodb_connection, connect_to_mongodb, get_mongodb
 from .redis_client import (cache_delete, cache_delete_pattern, cache_get,
                            cache_set, close_redis_connection, connect_to_redis)
 from .schemas import (CreateNote, EventSchema, NoteOut, SearchResult, Token,
-                      TokenData, UpdateNote, UserCreate, UserOut)
+                      UpdateNote, UserCreate, UserOut)
 from strawberry.fastapi import GraphQLRouter
 from .graphql_schema import schema
 
@@ -347,10 +347,11 @@ async def get_note(
 
 
     mongodb = get_mongodb()
+    es=get_elasticsearch()
     
     try:
         object_id = ObjectId(note_id)
-    except:
+    except (ValueError, TypeError):
         error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
     
     note = await mongodb.notes.find_one({
@@ -470,7 +471,7 @@ async def delete_note(
     
     try:
         object_id = ObjectId(note_id)
-    except:
+    except (ValueError, TypeError):
         error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
     
     existing_note = await mongodb.notes.find_one({
