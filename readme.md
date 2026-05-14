@@ -75,31 +75,141 @@ OpenAPI docs: **`/docs`** when the app is running.
 
 ## GraphQL
 
-- **URL:** `POST` / `GET` **`/graphql`** (GraphiQL in browser when enabled by Strawberry/FastAPI).
-- **Auth:** `Authorization: Bearer <access_token>` for user‑scoped fields.
+- **URL:** `POST` / `GET` **`/graphql`** (GraphiQL in the browser when enabled).
+- **Headers:** send `Authorization: Bearer <access_token>` when the operation requires auth (see tables below).
+- **Schema naming:** Strawberry exposes **camelCase** field and argument names in GraphQL by default (e.g. `createdAt`, `activityLogs`). Use **Docs** / introspection in GraphiQL if anything differs from your installed Strawberry version.
 
-Example dashboard‑style query (field names match this codebase’s **snake_case** GraphQL schema):
+### Types (`app/graphql_schema.py`)
+
+| Type | Fields / resolvers | Data source |
+|------|-------------------|-------------|
+| **User** | `id`, `username`, `email`, `createdAt` | Postgres (`users`) |
+| | `notes` → `[Note!]`! | MongoDB `notes` for this user id |
+| | `activityLogs` → `[ActivityLog!]`! | MongoDB `activity_logs` for this user id |
+| **Note** | `id`, `userId`, `title`, `content`, `tags`, `createdAt` | MongoDB `notes` |
+| | `author` → `User!` | Postgres user row for `userId` |
+| **ActivityLog** | `id`, `eventType`, `userId`, `resourceId`, `timestamp`, `metadata` (`JSON` scalar) | MongoDB `activity_logs` |
+
+### Queries (root `Query`)
+
+| GraphQL field | Arguments | Auth | Description |
+|---------------|-----------|------|-------------|
+| `me` | — | **Bearer required** | Current user from JWT + Postgres; nested `notes` / `activityLogs` from MongoDB. |
+| `user` | `id: ID!` | No* | Single user by Postgres integer id. |
+| `users` | — | No* | All users from Postgres. |
+| `note` | `id: ID!` | No* | Single note by MongoDB `ObjectId` string. |
+| `notes` | — | **Bearer required** | All notes for the authenticated user (JWT → Postgres user → Mongo query). |
+
+\*Not enforced in code today; protect at the edge (e.g. Nginx auth) or extend resolvers if you need these private.
+
+### Mutations (root `Mutation`)
+
+| GraphQL field | Arguments | Auth | Description |
+|---------------|-----------|------|-------------|
+| `createNote` | `title: String!`, `content: String!`, `tags: [String!]!` | **Bearer required** | Inserts note in MongoDB, indexes Elasticsearch (`notes` index), publishes Kafka `note_created`. |
+| `updateUser` | `id: ID!`, `username: String`, `email: String` | No* | Updates Postgres user; publishes Kafka `user_updated`. |
+
+\*Resolver does not validate JWT; treat as trusted‑admin unless you add checks.
+
+### Example: dashboard query (auth)
 
 ```graphql
 query CollabNoteDashboard {
   me {
     username
     email
-    created_at
+    createdAt
     notes {
       title
       tags
-      created_at
+      createdAt
     }
-    activity_logs {
-      event_type
+    activityLogs {
+      eventType
       timestamp
     }
   }
 }
 ```
 
-**Mutations** implemented here include `createNote` (Mongo + ES index + Kafka) and `updateUser` (Postgres + Kafka). Queries include `me`, `user`, `users`, `note`, and `notes`.
+### Example: other queries
+
+```graphql
+# All users (Postgres)
+query AllUsers {
+  users {
+    id
+    username
+    email
+    createdAt
+  }
+}
+
+# One user by Postgres id, with nested notes + logs
+query UserWithNotes($userId: ID!) {
+  user(id: $userId) {
+    id
+    username
+    notes {
+      id
+      title
+      createdAt
+    }
+    activityLogs {
+      eventType
+      timestamp
+    }
+  }
+}
+
+# One note by Mongo ObjectId; resolve author from Postgres
+query OneNote($noteId: ID!) {
+  note(id: $noteId) {
+    id
+    userId
+    title
+    content
+    tags
+    createdAt
+    author {
+      username
+      email
+    }
+  }
+}
+
+# Authenticated user's notes only
+query MyNotes {
+  notes {
+    id
+    title
+    content
+    tags
+    createdAt
+  }
+}
+```
+
+### Example: mutations
+
+```graphql
+mutation CreateNote($title: String!, $content: String!, $tags: [String!]!) {
+  createNote(title: $title, content: $content, tags: $tags) {
+    id
+    title
+    createdAt
+  }
+}
+
+mutation UpdateUser($id: ID!, $username: String, $email: String) {
+  updateUser(id: $id, username: $username, email: $email) {
+    id
+    username
+    email
+    createdAt
+  }
+}
+```
 
 ## Environment variables
 
