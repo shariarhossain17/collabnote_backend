@@ -1,14 +1,17 @@
 import os
+import socket
 import time
 from datetime import datetime, timedelta
 from typing import Dict, Optional
-import socket
+
 from bson import ObjectId
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, status,Request
+from fastapi import (Depends, FastAPI, Header, HTTPException, Query, Request,
+                     status)
 from fastapi.security import (HTTPAuthorizationCredentials, HTTPBearer,
                               OAuth2PasswordRequestForm)
 from sqlalchemy.orm import Session
+from strawberry.fastapi import GraphQLRouter
 
 from .auth import (ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token,
                    decode_access_token, hash_password, verify_password)
@@ -16,6 +19,7 @@ from .database import SessionLocal
 from .elasticsearch import (ELASTICSEARCH_INDEX,
                             close_elasticsearch_connection,
                             connect_to_elasticsearch, get_elasticsearch)
+from .graphql_schema import schema
 from .kafka_producer import (publish_log, start_kafka_producer,
                              stop_kafka_producer)
 from .models import User
@@ -24,8 +28,6 @@ from .redis_client import (cache_delete, cache_delete_pattern, cache_get,
                            cache_set, close_redis_connection, connect_to_redis)
 from .schemas import (CreateNote, EventSchema, NoteOut, SearchResult, Token,
                       UpdateNote, UserCreate, UserOut)
-from strawberry.fastapi import GraphQLRouter
-from .graphql_schema import schema
 
 load_dotenv()
 
@@ -59,9 +61,6 @@ security=HTTPBearer()
 
 @app.on_event("startup")
 async def startup_event():
-    if os.getenv("TESTING"):
-        print("Skipping external service startup (TESTING=1).")
-        return
     await connect_to_mongodb()
     await connect_to_elasticsearch()
     await connect_to_redis()
@@ -71,8 +70,6 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    if os.getenv("TESTING"):
-        return
     await close_mongodb_connection()
     await close_elasticsearch_connection()
     await close_redis_connection()
