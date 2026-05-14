@@ -100,6 +100,27 @@ def error_response(
         headers=headers
     )
 
+
+def parse_note_object_id(note_id: str) -> ObjectId:
+    try:
+        return ObjectId(note_id)
+    except (ValueError, TypeError):
+        error_response(
+            status.HTTP_400_BAD_REQUEST,
+            "Invalid note ID format",
+        )
+
+
+def build_note_update_payload(note_data: UpdateNote) -> dict:
+    update_data = {}
+    if note_data.title is not None:
+        update_data["title"] = note_data.title
+    if note_data.content is not None:
+        update_data["content"] = note_data.content
+    if note_data.tags is not None:
+        update_data["tags"] = note_data.tags
+    return update_data
+
 @app.get("/")
 async def home(request: Request):
     return {
@@ -205,7 +226,11 @@ async def login(
 
     # Check if user exists and password is correct
     if not user or not verify_password(form_data.password, user.pass_hash):
-        error_response(status.HTTP_401_UNAUTHORIZED, "incorrect username or password", headers={"WWW-Authenticate": "Bearer"},)
+        error_response(
+            status.HTTP_401_UNAUTHORIZED,
+            "incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     # Create access token
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
@@ -347,20 +372,18 @@ async def get_note(
 
 
     mongodb = get_mongodb()
-    es=get_elasticsearch()
-    
-    try:
-        object_id = ObjectId(note_id)
-    except (ValueError, TypeError):
-        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
-    
+    object_id = parse_note_object_id(note_id)
+
     note = await mongodb.notes.find_one({
         "_id": object_id,
         "user_id": current_user.id
     })
-    
+
     if not note:
-        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
+        error_response(
+            status.HTTP_404_NOT_FOUND,
+            "Note not found or you don't have access to it",
+        )
     
     note["_id"] = str(note["_id"])
     note["user_id"] = str(note["user_id"])
@@ -382,30 +405,23 @@ async def update_note(
     current_user: User = Depends(get_current_user)
 ):
     mongodb = get_mongodb()
-    es=get_elasticsearch()
-    
-    try:
-        object_id = ObjectId(note_id)
-    except:
-        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
-    
+    es = get_elasticsearch()
+
+    object_id = parse_note_object_id(note_id)
+
     existing_note = await mongodb.notes.find_one({
         "_id": object_id,
         "user_id": current_user.id
     })
-    
+
     if not existing_note:
-        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
-    
-   
-    update_data = {}
-    if note_data.title is not None:
-        update_data["title"] = note_data.title
-    if note_data.content is not None:
-        update_data["content"] = note_data.content
-    if note_data.tags is not None:
-        update_data["tags"] = note_data.tags
-    
+        error_response(
+            status.HTTP_404_NOT_FOUND,
+            "Note not found or you don't have access to it",
+        )
+
+    update_data = build_note_update_payload(note_data)
+
     if not update_data:
         error_response(status.HTTP_400_BAD_REQUEST, "No fields to update")
     
@@ -467,20 +483,20 @@ async def delete_note(
 ):
 
     mongodb = get_mongodb()
-    es=get_elasticsearch()
-    
-    try:
-        object_id = ObjectId(note_id)
-    except (ValueError, TypeError):
-        error_response(status.HTTP_400_BAD_REQUEST, "Invalid note ID format")
-    
+    es = get_elasticsearch()
+
+    object_id = parse_note_object_id(note_id)
+
     existing_note = await mongodb.notes.find_one({
         "_id": object_id,
         "user_id": current_user.id
     })
-    
+
     if not existing_note:
-        error_response(status.HTTP_404_NOT_FOUND, "Note not found or you don't have access to it")
+        error_response(
+            status.HTTP_404_NOT_FOUND,
+            "Note not found or you don't have access to it",
+        )
     
     result = await mongodb.notes.delete_one({
         "_id": object_id
@@ -648,7 +664,7 @@ async def get_activity(
 
 @app.get("/activity/stats")
 async def get_stats():
-    """Get statistics about logged events"""
+    """Get statistics about logged events."""
     mongodb = get_mongodb()
 
     total_logs = await mongodb.activity_logs.count_documents({})

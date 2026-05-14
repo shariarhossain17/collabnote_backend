@@ -41,11 +41,17 @@ async def connect_to_elasticsearch():
                 print(f"created elastic search index:{ELASTICSEARCH_INDEX}")
             return
         except Exception as e:
-            print(f"Elasticsearch connection attempt {attempt + 1}/{max_retries} failed: {e}")
+            print(
+                f"Elasticsearch connection attempt {attempt + 1}/"
+                f"{max_retries} failed: {e}"
+            )
             if attempt < max_retries - 1:
                 await asyncio.sleep(retry_delay)
             else:
-                print("Failed to connect to Elasticsearch after max retries. App will continue without search functionality.")
+                print(
+                    "Failed to connect to Elasticsearch after max retries. "
+                    "App will continue without search functionality."
+                )
                 es_client = None
                 return
 

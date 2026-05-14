@@ -193,7 +193,9 @@ class Query:
 @strawberry.type
 class Mutation:
     @strawberry.mutation
-    async def create_note(self, info, title: str, content: str, tags: List[str]) -> Note:
+    async def create_note(
+        self, info, title: str, content: str, tags: List[str]
+    ) -> Note:
         token = info.context.get("token")
         if not token:
             raise Exception("Not authenticated")
@@ -251,7 +253,13 @@ class Mutation:
         )
 
     @strawberry.mutation
-    async def update_user(self, info, id: strawberry.ID, username: Optional[str] = None, email: Optional[str] = None) -> User:
+    async def update_user(
+        self,
+        info,
+        id: strawberry.ID,
+        username: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> User:
         db: Session = info.context["db"]
         user = db.query(UserModel).filter(UserModel.id == int(id)).first()
         if not user:

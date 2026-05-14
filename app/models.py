@@ -14,7 +14,10 @@ class User(Base):
     role = Column(String(50), default="user", nullable=False)
 
 
-    __table_args__= ( UniqueConstraint("email",name="uq_user_email"), UniqueConstraint("username",name="uq_user_name"), )
+    __table_args__ = (
+        UniqueConstraint("email", name="uq_user_email"),
+        UniqueConstraint("username", name="uq_user_name"),
+    )
     
 
     def __repr__(self):
