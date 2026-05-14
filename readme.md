@@ -76,56 +76,56 @@ OpenAPI docs: **`/docs`** when the app is running.
 ## GraphQL
 
 Schema: **`app/graphql_schema.py`**. HTTP: **`GET` / `POST`** **`/graphql`**.  
-JWT লাগে যেখানে রিজলভার `info.context["token"]` চেক করে (`me`, `notes`, আর মিউটেশন `create_note`).
+Use a **Bearer JWT** wherever the resolver reads `info.context["token"]` (`me`, `notes`, and the `create_note` mutation).
 
-### নামগুলো কীভাবে ধরবেন (Strawberry → GraphQL)
+### Field names (Strawberry → GraphQL)
 
-`graphql_schema.py`‑এ টাইপ/ফিল্ড **Python `snake_case`**‑এ লেখা। Strawberry ডিফল্টে স্কিমায় **camelCase** দেখায় (GraphiQL **Docs** / introspection‑এ যা আসে সেটাই চালান)। সাধারণ ম্যাপিং:
+Types and fields in `graphql_schema.py` use Python **`snake_case`**. Strawberry’s default schema uses **camelCase** (use whatever GraphiQL **Docs** / introspection shows). Typical mapping:
 
-| Python (ফাইলে) | GraphQL (কোয়েরিতে) |
-|----------------|----------------------|
+| Python (in file) | GraphQL (in requests) |
+|------------------|------------------------|
 | `created_at` | `createdAt` |
 | `activity_logs` | `activityLogs` |
 | `user_id` | `userId` |
 | `event_type` | `eventType` |
 | `resource_id` | `resourceId` |
-| রুট মিউটেশন `create_note` | `createNote` |
-| রুট মিউটেশন `update_user` | `updateUser` |
+| Root mutation `create_note` | `createNote` |
+| Root mutation `update_user` | `updateUser` |
 
-একক শব্দ (`me`, `users`, `title`, `email`) দুই জায়গাতেই একই থাকে।
+Single-word names (`me`, `users`, `title`, `email`) stay the same.
 
-### কোয়েরি লেখার ধরন (GraphQL syntax)
+### How to write operations (GraphQL syntax)
 
-1. **`query` অপারেশন:** `query OptionalName { rootField { nestedFields } }`
-2. **আর্গুমেন্ট:** বন্ধনীতে — `user(id: "1")` বা ভেরিয়েবল দিয়ে নিচের মতো।
-3. **ভেরিয়েবল:** অপারেশনের নামের পর `($varName: Type!)` তারপর ফিল্ডে `(id: $varName)`; GraphiQL‑এ নিচে **Query Variables** JSON দিন।
-4. **নেস্ট:** প্রতিটি অবজেক্ট টাইপের জন্য `{}`‑এর ভিতরে শুধু যে ফিল্ড চান সেগুলো লিখুন।
-5. **অথ:** `Authorization: Bearer <access_token>` হেডার (REST লগইন থেকে `access_token`)।
+1. **`query` operation:** `query OptionalName { rootField { nestedFields } }`
+2. **Arguments:** in parentheses — `user(id: "1")` or with variables as below.
+3. **Variables:** after the operation name, `($varName: Type!)`, then the field uses `(id: $varName)`; paste **Query Variables** JSON in GraphiQL.
+4. **Nesting:** for each object type, list only the fields you need inside `{ }`.
+5. **Auth:** `Authorization: Bearer <access_token>` header (use `access_token` from REST login).
 
-### টাইপ ও ফিল্ড (স্কিমা অনুযায়ী)
+### Types and fields (per schema)
 
-**`User`** — `id`, `username`, `email`, `createdAt`; নেস্ট: `notes` → `[Note!]!`, `activityLogs` → `[ActivityLog!]!`  
-**`Note`** — `id`, `userId`, `title`, `content`, `tags`, `createdAt`; নেস্ট: `author` → `User!`  
-**`ActivityLog`** — `id`, `eventType`, `userId`, `resourceId`, `timestamp`, `metadata` (স্কেলার `JSON`)
+**`User`** — `id`, `username`, `email`, `createdAt`; nested: `notes` → `[Note!]!`, `activityLogs` → `[ActivityLog!]!`  
+**`Note`** — `id`, `userId`, `title`, `content`, `tags`, `createdAt`; nested: `author` → `User!`  
+**`ActivityLog`** — `id`, `eventType`, `userId`, `resourceId`, `timestamp`, `metadata` (`JSON` scalar)
 
-### রুট `Query` (শুধু এইগুলো)
+### Root `Query` fields
 
-| রুট ফিল্ড | আর্গুমেন্ট | JWT |
-|-----------|------------|-----|
-| `me` | — | দরকার |
-| `user` | `id: ID!` | চেক নেই |
-| `users` | — | চেক নেই |
-| `note` | `id: ID!` | চেক নেই |
-| `notes` | — | দরকার |
+| Root field | Arguments | JWT checked in resolver |
+|------------|-----------|-------------------------|
+| `me` | — | Yes |
+| `user` | `id: ID!` | No |
+| `users` | — | No |
+| `note` | `id: ID!` | No |
+| `notes` | — | Yes |
 
-### রুট `Mutation`
+### Root `Mutation` fields
 
-| ফিল্ড | আর্গুমেন্ট | JWT |
-|--------|------------|-----|
-| `createNote` | `title: String!`, `content: String!`, `tags: [String!]!` | দরকার |
-| `updateUser` | `id: ID!`, `username: String`, `email: String` | চেক নেই |
+| Field | Arguments | JWT checked in resolver |
+|-------|-----------|-------------------------|
+| `createNote` | `title: String!`, `content: String!`, `tags: [String!]!` | Yes |
+| `updateUser` | `id: ID!`, `username: String`, `email: String` | No |
 
-### উদাহরণ: `me` (ড্যাশবোর্ড স্টাইল, camelCase)
+### Example: `me` (dashboard-style, camelCase)
 
 ```graphql
 query Dashboard {
@@ -148,10 +148,10 @@ query Dashboard {
 }
 ```
 
-### উদাহরণ: `user`, `users`, `note`, `notes`
+### Example: `user`, `users`, `note`, `notes`
 
 ```graphql
-# Postgres ইউজার ID (সংখ্যা স্ট্রিং হিসেবে ID তে)
+# Postgres user id (numeric id as a string in GraphQL ID)
 query OneUser($userId: ID!) {
   user(id: $userId) {
     id
@@ -170,7 +170,7 @@ query AllUsers {
   }
 }
 
-# Mongo ObjectId স্ট্রিং
+# MongoDB ObjectId string
 query OneNote($noteId: ID!) {
   note(id: $noteId) {
     id
@@ -197,13 +197,13 @@ query MyNotes {
 }
 ```
 
-**Variables উদাহরণ (GraphiQL):**
+**Example variables (GraphiQL):**
 
 ```json
 { "userId": "1", "noteId": "507f1f77bcf86cd799439011" }
 ```
 
-### উদাহরণ: মিউটেশন
+### Example: mutations
 
 ```graphql
 mutation NewNote($title: String!, $content: String!, $tags: [String!]!) {
@@ -236,7 +236,9 @@ mutation PatchUser($id: ID!, $username: String, $email: String) {
 { "id": "1", "username": "newname", "email": null }
 ```
 
-> নিশ্চিত না হলে GraphiQL‑এ **Schema** / **Docs** খুলে ফিল্ডের ঠিক নাম কপি করুন; Strawberry ভার্সনে `auto_camel_case` বন্ধ থাকলে নাম `snake_case`‑ও হতে পারে।
+> If unsure, open **Schema** / **Docs** in GraphiQL and copy exact field names. If `StrawberryConfig(auto_camel_case=False)` is ever set, names may stay `snake_case` instead.
+
+## Environment variables
 
 All configuration is via environment variables. See **`.env.example`** for the full list and placeholders. **`DATABASE_URL`**, **`SECRET_KEY`**, **`MONGODB_URL`**, **`REDIS_URL`**, **`ELASTICSEARCH_URL`**, and **`KAFKA_BOOTSTRAP_SERVERS`** must be set correctly for your environment (hostnames differ between `localhost` and Docker service names).
 
