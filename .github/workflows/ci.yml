@@ -109,15 +109,21 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
   # ==========================================
-  # DEPLOY TO EC2 (BONUS)
+  # DEPLOY TO EC2 (BONUS — optional)
+  # Runs only when EC2_* Action secrets are configured (see README).
   # ==========================================
   deploy:
     runs-on: ubuntu-latest
     name: Deploy to EC2
 
-    # Only deploy after successful build
+    # Only deploy after successful build, and only if SSH secrets exist
     needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      secrets.EC2_HOST != '' &&
+      secrets.EC2_USERNAME != '' &&
+      secrets.EC2_SSH_KEY != ''
 
     steps:
       - name: Checkout code
