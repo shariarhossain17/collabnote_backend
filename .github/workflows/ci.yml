@@ -49,6 +49,9 @@ jobs:
           python -m flake8 app/ --count --max-complexity=10 --max-line-length=88 --statistics
 
       - name: Run tests with pytest
+        env:
+          TESTING: "1"
+          DATABASE_URL: "sqlite:///:memory:"
         run: |
           echo "Running pytest..."
           python -m pytest app/test_main.py -v --cov=app --cov-report=xml --cov-report=term

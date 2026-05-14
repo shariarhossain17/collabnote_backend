@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker,DeclarativeBase
 load_dotenv()
 
 
-DATABASE_URL=os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
+if os.getenv("TESTING") and not DATABASE_URL:
+    DATABASE_URL = "sqlite:///:memory:"
 
 class Base(DeclarativeBase):
     pass

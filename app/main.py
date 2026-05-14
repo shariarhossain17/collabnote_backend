@@ -59,6 +59,9 @@ security=HTTPBearer()
 
 @app.on_event("startup")
 async def startup_event():
+    if os.getenv("TESTING"):
+        print("Skipping external service startup (TESTING=1).")
+        return
     await connect_to_mongodb()
     await connect_to_elasticsearch()
     await connect_to_redis()
@@ -68,6 +71,8 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if os.getenv("TESTING"):
+        return
     await close_mongodb_connection()
     await close_elasticsearch_connection()
     await close_redis_connection()
