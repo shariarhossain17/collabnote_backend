@@ -50,3 +50,8 @@ wheels/
 # OS
 .DS_Store
 Thumbs.db
+
+
+#pem file
+*.pem
+.poridhi-key.pem
