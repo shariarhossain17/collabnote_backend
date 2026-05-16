@@ -54,3 +54,4 @@ async def publish_log(log_data:dict):
 def get_topic_name():
     return KAFKA_TOPIC
 
+#author shahriar
