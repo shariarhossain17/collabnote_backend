@@ -1,23 +1,19 @@
 name: CI/CD Pipeline for FastAPI
 
 on:
-  # Trigger on push to main branch
   push:
     branches: [main]
     paths-ignore:
-      - "**.md" # Ignore README changes
+      - "**.md"
 
-  # Trigger on pull requests
   pull_request:
     branches: [main]
 
-  # Manual trigger
   workflow_dispatch:
 
 env:
-  # Docker registry
   REGISTRY: docker.io
-  IMAGE_NAME: ${{ vars.DOCKERHUB_USERNAME }}/fastapi-app
+  IMAGE_NAME: shariar17/fastapi-app
 
 jobs:
   # ==========================================
@@ -68,9 +64,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Build & Push Docker Image
 
-    # Only run if tests passed
     needs: test
-    # Only push on main branch pushes (not PRs)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:
@@ -109,13 +103,12 @@ jobs:
           platforms: linux/amd64,linux/arm64
 
   # ==========================================
-  # DEPLOY TO EC2 (BONUS)
+  # DEPLOY TO EC2
   # ==========================================
   deploy:
     runs-on: ubuntu-latest
     name: Deploy to EC2
 
-    # Only deploy after successful build
     needs: build-and-push
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
@@ -130,8 +123,11 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            echo "Logging in to DockerHub..."
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ vars.DOCKERHUB_USERNAME }}" --password-stdin
+
             echo "Pulling latest image..."
-            docker pull ${{ env.IMAGE_NAME }}:latest
+            docker pull shariar17/fastapi-app:latest
 
             echo "Stopping old container..."
             docker stop fastapi-app || true
@@ -143,7 +139,7 @@ jobs:
               --restart unless-stopped \
               -p 8000:8000 \
               -e INSTANCE_ID=EC2-Production \
-              ${{ env.IMAGE_NAME }}:latest
+              shariar17/fastapi-app:latest
 
             echo "Cleaning up old images..."
             docker system prune -af
