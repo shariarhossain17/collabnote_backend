@@ -1,0 +1,200 @@
+services:
+  db:
+    image: postgres:16
+    container_name: collabnote_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: collabnote
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_collabnote:/var/lib/postgresql/data
+    networks:
+      - collabnote_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d collabnote"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mongodb:
+    image: mongo:7
+    container_name: collabnote_mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mongodb
+      MONGO_INITDB_ROOT_PASSWORD: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata_collabnote:/data/db
+    networks:
+      - collabnote_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.1
+    container_name: collabnote_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    mem_limit: 1g
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - esdata_collabnote:/usr/share/elasticsearch/data
+    networks:
+      - collabnote_network
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  redis:
+    image: redis:7-alpine
+    container_name: collabnote_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata_collabnote:/data
+    networks:
+      - collabnote_network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: collabnote_kafka
+    ports:
+      - "9092:9092"
+    networks:
+      - collabnote_network
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "kafka-broker-api-versions",
+          "--bootstrap-server",
+          "localhost:9092",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: collabnote_nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - fastapi1
+      - fastapi2
+    networks:
+      - collabnote_network
+    restart: unless-stopped
+
+  fastapi1:
+    image: shariar17/fastapi-app:latest
+    container_name: collabnote_fastapi1
+    environment:
+      - INSTANCE_ID=FastAPI-1
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/collabnote
+      - SECRET_KEY=your-secret-key-here-change-in-production-min-32-characters-long
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - MONGODB_URL=mongodb://mongodb:mongodb@mongodb:27017
+      - MONGODB_DB_NAME=collabnote
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=notes
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TTL=3600
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=activity_logs
+    networks:
+      - collabnote_network
+    depends_on:
+      db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+  fastapi2:
+    image: shariar17/fastapi-app:latest
+    container_name: collabnote_fastapi2
+    environment:
+      - INSTANCE_ID=FastAPI-2
+      - DATABASE_URL=postgresql+psycopg2://postgres:postgres@db:5432/collabnote
+      - SECRET_KEY=your-secret-key-here-change-in-production-min-32-characters-long
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - MONGODB_URL=mongodb://mongodb:mongodb@mongodb:27017
+      - MONGODB_DB_NAME=collabnote
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=notes
+      - REDIS_URL=redis://redis:6379/0
+      - CACHE_TTL=3600
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - KAFKA_TOPIC=activity_logs
+    networks:
+      - collabnote_network
+    depends_on:
+      db:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  collabnote_network:
+    driver: bridge
+
+volumes:
+  pgdata_collabnote:
+  mongodata_collabnote:
+  esdata_collabnote:
+  redisdata_collabnote:
